@@ -1,67 +1,86 @@
-
-
-
-
-
-
 # Load libraries
 library(shiny)
 library(dplyr)
 library(shinycssloaders)  # For loading animations
 library(shinythemes)      # For theme support
 
+
+
+
+aws_prefix <- '/mnt/efs/fs1/destination_folder/Expression_app/'
+#aws_prefix <- 'C:/Users/17735/Downloads/Expression_app/'
+
+
+
 # Define the UI
 ui <- fluidPage(
   theme = shinytheme("flatly"),
+  
+  # Include Google Fonts and CSS styling for Montserrat
   tags$head(
+    tags$link(
+      href = "https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&display=swap", 
+      rel = "stylesheet"
+    ),
     tags$style(HTML("
-    .shiny-input-container { margin-bottom: 20px; }
-    h4 { color: #5c9fd7; }  /* Updated light blue color */
-    .btn-primary { background-color: #5c9fd7; border-color: #5c9fd7; }
-    .btn-primary:hover { background-color: #4a8cbb; border-color: #4a8cbb; }  /* Slightly darker for hover */
-    table { margin-top: 20px; border-collapse: collapse; width: 100%; }
-    th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }
-    th { background-color: #f2f2f2; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    tr:hover { background-color: #f1f1f1; }
-  "))
+      body { font-family: 'Montserrat', sans-serif; }
+      h1, h2, h3, h4, h5, h6 { font-family: 'Montserrat', sans-serif; font-weight: 700; }
+      .shiny-input-container { margin-bottom: 20px; }
+      h4 { color: #5c9fd7; font-weight: 700; }
+      .btn-primary { background-color: #5c9fd7; border-color: #5c9fd7; }
+      .btn-primary:hover { background-color: #4a8cbb; border-color: #4a8cbb; }
+      table { margin-top: 20px; border-collapse: collapse; width: 100%; }
+      th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }
+      th { background-color: #f2f2f2; }
+      tr:nth-child(even) { background-color: #f9f9f9; }
+      tr:hover { background-color: #f1f1f1; }
+    "))
   ),
   
   titlePanel("Gene Expression Explorer"),
   
   sidebarLayout(
     sidebarPanel(
-      h4("Select up to 10 genes:"),
+      h4(""),
       selectizeInput(
-        "selected_genes", "Genes:",
+        "selected_genes", 
+        tags$span(style = "color: #5c9fd7;", "Select up to 10 genes:"),
         choices = NULL,  # Initially empty, populated dynamically
         multiple = TRUE, 
         options = list(
-          maxItems = 10,              # Limit selections to 10
+          maxItems = 10,
           placeholder = 'Start typing to search for genes',
-          create = FALSE              # Prevent users from entering new (non-existent) genes
+          create = FALSE
         )
       ),
-      actionButton("check_button", "Check Expression", class = "btn-primary")  # Use a primary button style
+      actionButton("check_button", "Check Expression", class = "btn-primary")
     ),
     
     mainPanel(
-      h4("Gene Expression Results:"),
-      withSpinner(tableOutput("expression_results"))  # Add loading spinner
+      # Conditionally display the Results header
+      conditionalPanel(
+        condition = "output.showResults === true",
+        h4("Results:")
+      ),
+      # Render the table and spinner only after the button press
+      uiOutput("table_ui")
     )
   )
 )
 
 # Define the Server logic
 server <- function(input, output, session) {
-  # Read all expression data files from 'preexisting_data' folder
-  expression_data <- read.csv("C:/Users/17735/Downloads/Expression_app/preexisting_data/Expression_RPKM.tsv", sep = "")
+  # Read expression data
+  expression_data <- read.csv(paste0(aws_prefix, "preexisting_data/Expression_RPKM.tsv"), sep = "")
   
   # Dynamically update selectize input with gene names as options
   observe({
     genes <- expression_data[[1]]  # Assume first column contains gene names
     updateSelectizeInput(session, "selected_genes", choices = genes, server = TRUE)
   })
+  
+  # Store the state of the button press
+  button_pressed <- reactiveVal(FALSE)
   
   # Reactive expression to calculate expression summaries for selected genes
   expression_summary <- reactive({
@@ -95,15 +114,27 @@ server <- function(input, output, session) {
     return(results)
   })
   
-  # Render the expression results table when the button is clicked
-  output$expression_results <- renderTable({
-    input$check_button  # Trigger table render on button click
-    isolate(expression_summary())
+  # Update the button press state and render the UI dynamically
+  observeEvent(input$check_button, {
+    button_pressed(TRUE)  # Set button as pressed
+    
+    output$table_ui <- renderUI({
+      req(button_pressed())  # Ensure the button has been pressed
+      withSpinner(tableOutput("expression_results"))
+    })
+    
+    output$expression_results <- renderTable({
+      expression_summary()
+    })
   })
+  
+  # Check if the results should be shown
+  output$showResults <- reactive({
+    button_pressed() && nrow(expression_summary()) > 0
+  })
+  outputOptions(output, "showResults", suspendWhenHidden = FALSE)  # Ensure it updates immediately
 }
 
 # Run the app
 shinyApp(ui = ui, server = server)
-
-
 

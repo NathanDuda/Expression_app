@@ -1,5 +1,5 @@
 
-
+library(tidyverse)
 
 # import all expression files 
 p1_exp <- read.csv("C:/Users/17735/Downloads/Azenta_Normalization_Results/P1_Averaged_RPKM_exp.tsv", sep="")
@@ -32,7 +32,6 @@ exp <- exp %>%
 
 
 write.table(exp, file = 'C:/Users/17735/Downloads/Expression_app/preexisting_data/Expression_RPKM.tsv')
-
 
 
 
