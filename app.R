@@ -10,8 +10,8 @@ library(showtext)
 library(ggplot2)
 
 # Define file path
-#aws_prefix <- 'C:/Users/17735/Downloads/Expression_app/'
-aws_prefix <- '/mnt/efs/fs1/destination_folder/Expression_app/'
+aws_prefix <- 'C:/Users/17735/Downloads/Expression_app/'
+#aws_prefix <- '/mnt/efs/fs1/destination_folder/Expression_app/'
 
 font_add_google(name = "Montserrat", family = 'Montserrat') 
 showtext_auto()
@@ -85,7 +85,7 @@ ui <- fluidPage(
         "column_select_temp", 
         "Select a cell line:", 
         choices = NULL, 
-        selected = ""  # Default to no selection
+        selected = "none"  # Default to no selection
       ),
       
       actionButton("check_button", "Check Expression", class = "btn-primary")
@@ -100,7 +100,7 @@ ui <- fluidPage(
       
       # Use a fluidRow to position stats and plot side by side
       uiOutput("column_stats_ui"),  # UI for column stats and plot
-      
+      uiOutput("combined_ui"),
       # Add a results table below the column stats and plot
       uiOutput("table_ui")  # Main table UI
     )
@@ -134,7 +134,6 @@ server <- function(input, output, session) {
       max = max(exp, na.rm = TRUE)
     )
   colnames(top_donor_stats) <- c('Top_Donor', 'Median', 'Q25', 'Q75', 'Q90', 'Max')
-  
   selected_genes <- reactiveVal()
   selected_column <- reactiveVal()
   
@@ -145,22 +144,9 @@ server <- function(input, output, session) {
   })
   
   # Populate the column selector
-  # Populate the column selector
   observe({
-    column_choices <- c("", names(valid_genes_data)[-1])
-    updateSelectInput(session, "column_select_temp", choices = column_choices, selected = "")
-  })
-  
-  # Reset gene selection when column is selected
-  observeEvent(input$column_select_temp, {
-    updateSelectizeInput(session, "selected_genes_temp", selected = character(0))  # Clear gene selection
-  })
-  
-  # Reset column selection when genes are selected
-  observeEvent(input$selected_genes_temp, {
-    if (length(input$selected_genes_temp) > 0) {
-      updateSelectInput(session, "column_select_temp", selected = "")  # Clear column selection
-    }
+    column_choices <- c("none", names(valid_genes_data)[-1])
+    updateSelectInput(session, "column_select_temp", choices = column_choices, selected = "none")
   })
   
   
@@ -171,9 +157,13 @@ server <- function(input, output, session) {
     selected_genes(input$selected_genes_temp)
     selected_column(input$column_select_temp)
     
-    # Render the main expression results table
     output$table_ui <- renderUI({
-      if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
+      if (!is.null(selected_genes()) && length(selected_genes()) > 0 && !is.null(selected_column()) && selected_column() != "none") {
+        tagList(
+          h4(paste0("Expression of selected genes in ", selected_column())),  # Title for combined results table
+          withSpinner(DTOutput("combined_results"))
+        )
+      } else if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
         tagList(
           h4("Expression Results"),  # Title for main results table
           withSpinner(DTOutput("expression_results"))
@@ -187,55 +177,13 @@ server <- function(input, output, session) {
     })
     
     
-    
-    
-    output$expression_results <- renderDT({
-      if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
-        
-        # Create the datatable
-        datatable(
-          expression_summary_genes(),
-          options = list(
-            pageLength = 10,
-            dom = 't',  # Controls the elements in the table (can include 'p' for pagination, etc.)
-            autoWidth = TRUE,
-            headerCallback = JS(
-              "function(thead, data, start, end, display) {",
-              "  var $thead = $(thead);",
-              # Create a new row for the header grouping
-              "  var groupRow = '<tr>' +",
-              "    '<th></th>' +",  # Empty header for the 'Gene' column
-              "    '<th></th>' +",  # Empty header for the 'Expressed' column
-              "    '<th colspan=\"2\" style=\"text-align:center;\">Top donor expression</th>' +",  # Group for Top Donor Stats
-              "    '<th colspan=\"5\" style=\"text-align:center;\">Expression distribution of the top donor</th>' +",  # Group for Expression Distribution
-              "    '</tr>'; ",  # Close the new header row
-              "  $thead.before(groupRow);",  # Insert the new row before the current header
-              "}"
-            )  # Close headerCallback
-          ),
-          escape = FALSE,  # Allows HTML in table cells if needed
-          rownames = FALSE  # Don't show row names
-        )
-      } else {
-        datatable(expression_summary_column(), options = list(pageLength = 10, searchable = TRUE),
-                  rownames = F)
-      }
-    })
-    
-    
-    
-    
-    
-    # Conditionally render the column statistics table and plot
-    output$column_stats_ui <- renderUI({
-      if (is.null(selected_genes()) || length(selected_genes()) == 0) {
-        req(selected_column())  # Ensure a column is selected
-        
+    output$combined_ui <- renderUI({
+      if (!is.null(selected_column()) && selected_column() != "none") {
         fluidRow(
           column(
             width = 6,
             tagList(
-              h4("Summary Statistics"),  # Title for stats table
+              h4(paste0("Summary Statistics of ", selected_column())),  # Title for stats table
               withSpinner(DTOutput("column_stats_table"))
             )
           ),
@@ -248,143 +196,190 @@ server <- function(input, output, session) {
           )
         )
       } else {
+        NULL  # Return NULL to avoid rendering empty space when only genes are selected
+      }
+    })
+    output$combined_results <- renderDT({
+      if (!is.null(selected_genes()) && length(selected_genes()) > 0 && !is.null(selected_column()) && selected_column() != "none") {
+        filtered_genes <- expression_summary_column() %>%
+          filter(Gene %in% selected_genes())
+        
+        # Include the selected column in the results
+        combined_data <- filtered_genes# %>%
+        #  mutate(Selected_Column_Value = valid_genes_data[[selected_column()]][match(filtered_genes$Gene, valid_genes_data$ID)]) %>%
+        # select(Gene, Expressed, Top_Donor, Top_Expression_Value, Selected_Column_Value)
+        
+        datatable(
+          combined_data,
+          options = list(
+            pageLength = 10,
+            dom = 't',  # Controls the elements in the table
+            autoWidth = TRUE
+          ),
+          rownames = FALSE
+        )
+      }
+    })
+    
+    output$expression_results <- renderDT({
+      if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
+        filtered_data <- expression_summary_genes() %>%
+          filter(Gene %in% selected_genes())
+        
+        datatable(
+          filtered_data,
+          options = list(
+            pageLength = 10,
+            dom = 't',  # Controls the elements in the table
+            autoWidth = TRUE
+          ),
+          rownames = FALSE
+        )
+      } else {
+        datatable(expression_summary_column(), options = list(pageLength = 10, searchable = TRUE),
+                  rownames = F)
+      }
+    })
+    # Conditionally render the column statistics table and plot
+    output$column_stats_ui <- renderUI({
+      if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
         NULL  # Hide if genes are selected
+      } else if (!is.null(selected_column()) && selected_column() != "") {
+        NULL
+      } else {
+        NULL
+      }
+    })
+    
+    output$column_stats_table <- renderDT({
+      if (!is.null(selected_column()) && selected_column() != "none") {
+        req(selected_column())  # Ensure a column is selected
+        datatable(column_statistics_summary(), options = list(pageLength = 5,
+                                                              searching = F,
+                                                              paging = F,
+                                                              info = F),
+                  rownames = F)
       }
     })
     
     
     
-    output$column_stats_table <- renderDT({
-      req(selected_column())  # Ensure a column is selected
-      datatable(column_statistics_summary(), options = list(pageLength = 5,
-                                                            searching = F,
-                                                            paging = F,
-                                                            info = F),
-                rownames = F)
-    })
   })
-  
-  
   
   output$column_distribution_plot <- renderPlot({
-    req(selected_column())  # Ensure a column is selected
-    
-    selected_col <- selected_column()
-    values <- valid_genes_data[[selected_col]]  # Extract the column values
-    
-    # Create a data frame with sorted values and their ranks
-    plot_data <- data.frame(
-      Value = values  # Sorted expression values
-    )
-    
-    # Calculate statistics
-    median_val <- median(values, na.rm = TRUE)
-    max_val <- max(values, na.rm = TRUE)
-    lower_bound <- quantile(values, 0.25, na.rm = TRUE)  # 25th percentile
-    upper_bound <- quantile(values, 0.75, na.rm = TRUE)  # 75th percentile
-    
-    # Create a line plot with a log-scaled x-axis using ggplot2
-    ggplot(plot_data, aes(x = Value)) +
-      geom_density(aes(y = ..density..), fill = "#8dbcE3", color = "#5c9fd7", size = 1, alpha = 0.6) +  # Fill with a lighter shade
-      xlim(0, upper_bound*2) +
-      geom_vline(aes(xintercept = median_val, linetype = "Median"), color = "gray20") +  # Median line
-      geom_vline(aes(xintercept = lower_bound, linetype = "IQR"), color = "gray20") +  # 25th percentile line
-      geom_vline(aes(xintercept = upper_bound, linetype = "IQR"), color = "gray20") +  # 75th percentile line
-      scale_linetype_manual(
-        name = "",
-        values = c("Median" = "dashed", "IQR" = "dotted"),
-        labels = c("IQR (25th and 75th Percentile)", "Median")
-      ) +
-      theme_minimal() +  # Apply a clean theme
-      theme(
-        legend.position = c(0.99, 0.99),  # Position legend in the upper right corner
-        legend.justification = c("right", "top"),  # Align the legend to the top right
-        text = element_text(family = "Montserrat")) +
-          labs(
-            title = '',
-            x = "Expression Value", 
-            y = "Density"
-          ) 
+    if (!is.null(selected_column()) && selected_column() != "none") {
+      req(selected_column())  # Ensure a column is selected
       
+      selected_col <- selected_column()
+      values <- valid_genes_data[[selected_col]]  # Extract the column values
+      
+      # Create a data frame with sorted values and their ranks
+      plot_data <- data.frame(
+        Value = values  # Sorted expression values
+      )
+      
+      # Calculate statistics
+      median_val <- median(values, na.rm = TRUE)
+      max_val <- max(values, na.rm = TRUE)
+      lower_bound <- quantile(values, 0.25, na.rm = TRUE)  # 25th percentile
+      upper_bound <- quantile(values, 0.75, na.rm = TRUE)  # 75th percentile
+      
+      # Create a line plot with a log-scaled x-axis using ggplot2
+      ggplot(plot_data, aes(x = Value)) +
+        geom_density(aes(y = ..density..), fill = "#8dbcE3", color = "#5c9fd7", size = 1, alpha = 0.6) +  # Fill with a lighter shade
+        xlim(0, upper_bound*2) +
+        geom_vline(aes(xintercept = median_val, linetype = "Median"), color = "gray20") +  # Median line
+        geom_vline(aes(xintercept = lower_bound, linetype = "IQR"), color = "gray20") +  # 25th percentile line
+        geom_vline(aes(xintercept = upper_bound, linetype = "IQR"), color = "gray20") +  # 75th percentile line
+        scale_linetype_manual(
+          name = "",
+          values = c("Median" = "dashed", "IQR" = "dotted"),
+          labels = c("IQR (25th and 75th Percentile)", "Median")
+        ) +
+        theme_minimal() +  # Apply a clean theme
+        theme(
+          legend.position = c(0.99, 0.99),  # Position legend in the upper right corner
+          legend.justification = c("right", "top"),  # Align the legend to the top right
+          text = element_text(family = "Montserrat")) +
+        labs(
+          title = '',
+          x = "Expression Value", 
+          y = "Density"
+        ) 
+    }
   })
-  
   
   # Reactive summary logic (genes and column-based)
   expression_summary_genes <- reactive({
-    
-    req(selected_genes())
-    
-    filtered_data <- valid_genes_data %>% 
-      filter(ID %in% selected_genes())
-    
-    filtered_data$Top_Donor <- apply(filtered_data[-1], 1, function(x) names(x)[x == max(x, na.rm = TRUE)])
-    
-    out2 <- filtered_data %>%
-      rowwise() %>%
-      mutate(
-        Top_Expression_Value = max(c_across(where(is.numeric)), na.rm = TRUE),
-        Total_Expression = sum(c_across(where(is.numeric))),
-        Expressed = ifelse(Total_Expression > 0, "Yes", "No"),
-        Top_Donor = ifelse(Expressed == "No", "", Top_Donor)
-      ) %>%
-      merge(top_donor_stats, by = 'Top_Donor') %>%
-      select(Gene = ID, Expressed, Top_Donor, Top_Expression_Value, 
-             Q25, Median, Q75, Q90, Max)
-    colnames(out2) <- c('Gene', 'Expressed', 'Top donor', 'Expression value', 
-                        '25th Percentile', 'Median', '75th Percentile', '90th Percentile', 'Max')
-    out2
-    
+    if (!is.null(selected_genes()) && length(selected_genes()) > 0) {
+      filtered_data <- valid_genes_data %>% 
+        filter(ID %in% selected_genes())
+      
+      filtered_data$Top_Donor <- apply(filtered_data[-1], 1, function(x) names(x)[x == max(x, na.rm = TRUE)])
+      
+      out2 <- filtered_data %>%
+        rowwise() %>%
+        mutate(
+          Top_Expression_Value = max(c_across(where(is.numeric)), na.rm = TRUE),
+          Total_Expression = sum(c_across(where(is.numeric))),
+          Expressed = ifelse(Total_Expression > 0, "Yes", "No"),
+          Top_Donor = ifelse(Expressed == "No", "", Top_Donor)
+        ) %>%
+        merge(top_donor_stats, by = 'Top_Donor') %>%
+        select(Gene = ID, Expressed, Top_Donor, Top_Expression_Value, 
+               Q25, Median, Q75, Q90, Max)
+      colnames(out2) <- c('Gene', 'Expressed', 'Top donor', 'Expression value', 
+                          '25th Percentile', 'Median', '75th Percentile', '90th Percentile', 'Max')
+      out2
+    }
   })
   
   # Reactive expression for column-based summaries with percentile and statistics
   expression_summary_column <- reactive({
-    req(selected_column())  
-    
-    selected_col <- selected_column()
-    
-    # Calculate column statistics
-    filtered_data <- valid_genes_data %>%
-      mutate(
-        Value = get(selected_col),
-        Expressed = ifelse(Value > 0, "Yes", "No"),
-        Percentile = round(percent_rank(Value) * 100, 2)  # Calculate percentile
-      ) %>%
-      arrange(desc(Value))  # Sort descending by Value for clarity
-    
-    # get stats values for the selected column 
-    filtered_data$Median <- top_donor_stats$Median[top_donor_stats$Top_Donor == selected_column()]
-    filtered_data$Q25 <- top_donor_stats$Q25[top_donor_stats$Top_Donor == selected_column()]
-    filtered_data$Q75 <- top_donor_stats$Q75[top_donor_stats$Top_Donor == selected_column()]
-    filtered_data$Q90 <- top_donor_stats$Q90[top_donor_stats$Top_Donor == selected_column()]
-    filtered_data$Max <- top_donor_stats$Max[top_donor_stats$Top_Donor == selected_column()]
-    
-    # Select columns to display
-    out <- filtered_data %>%
-      arrange(ID) %>%
-      select(Gene = ID, Expressed, Value, Percentile)
-    colnames(out)[3] <- 'Expression Value'
-    out
-    
+    if (!is.null(selected_column()) && selected_column() != "none") {
+      selected_col <- selected_column()
+      
+      # Calculate column statistics
+      filtered_data <- valid_genes_data %>%
+        mutate(
+          Value = get(selected_col),
+          Expressed = ifelse(Value > 0, "Yes", "No"),
+          Percentile = round(percent_rank(Value) * 100, 2)  # Calculate percentile
+        ) %>%
+        arrange(desc(Value))  # Sort descending by Value for clarity
+      
+      # get stats values for the selected column 
+      filtered_data$Median <- top_donor_stats$Median[top_donor_stats$Top_Donor == selected_column()]
+      filtered_data$Q25 <- top_donor_stats$Q25[top_donor_stats$Top_Donor == selected_column()]
+      filtered_data$Q75 <- top_donor_stats$Q75[top_donor_stats$Top_Donor == selected_column()]
+      filtered_data$Q90 <- top_donor_stats$Q90[top_donor_stats$Top_Donor == selected_column()]
+      filtered_data$Max <- top_donor_stats$Max[top_donor_stats$Top_Donor == selected_column()]
+      
+      # Select columns to display
+      out <- filtered_data %>%
+        arrange(ID) %>%
+        select(Gene = ID, Expressed, Value, Percentile)
+      colnames(out)[3] <- 'Expression Value'
+      out
+    }
   })
-  
   
   column_statistics_summary <- reactive({
-    req(selected_column())  # Ensure a column is selected
-    
-    selected_col <- selected_column()
-    
-    # Filter and summarize statistics for the selected column
-    stats <- top_donor_stats %>%
-      filter(Top_Donor == selected_col) %>%
-      select(Q25, Median, Q75, Q90, Max)
-    
-    # Create a simple summary table with labels
-    data.frame(
-      Statistic = c('25th Percentile', "Median", '75th Percentile', '90th Percentile', "Max"),
-      Value = c(stats$Q25, stats$Median, stats$Q75, stats$Q90, stats$Max)
-    )
+    if (!is.null(selected_column()) && selected_column() != "none") {
+      selected_col <- selected_column()
+      
+      # Filter and summarize statistics for the selected column
+      stats <- top_donor_stats %>%
+        filter(Top_Donor == selected_col) %>%
+        select(Q25, Median, Q75, Q90, Max)
+      
+      # Create a simple summary table with labels
+      data.frame(
+        Statistic = c('25th Percentile', "Median", '75th Percentile', '90th Percentile', "Max"),
+        Value = c(stats$Q25, stats$Median, stats$Q75, stats$Q90, stats$Max)
+      )
+    }
   })
-  
   
   # Control when to show the results section
   output$showResults <- reactive({
