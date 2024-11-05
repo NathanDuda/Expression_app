@@ -10,8 +10,8 @@ library(showtext)
 library(ggplot2)
 
 # Define file path
-aws_prefix <- 'C:/Users/17735/Downloads/Expression_app/'
-#aws_prefix <- '/mnt/efs/fs1/destination_folder/Expression_app/'
+#aws_prefix <- 'C:/Users/17735/Downloads/Expression_app/'
+aws_prefix <- '/mnt/efs/fs1/destination_folder/Expression_app/'
 
 font_add_google(name = "Montserrat", family = 'Montserrat') 
 showtext_auto()
